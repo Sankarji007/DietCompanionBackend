@@ -7,6 +7,7 @@ import javax.servlet.http.*;
 import javax.servlet.annotation.*;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.sql.SQLException;
 
 @WebServlet(name = "SaveRecipe", value = "/SaveRecipe")
 public class SaveRecipe extends HttpServlet {
@@ -19,7 +20,14 @@ public class SaveRecipe extends HttpServlet {
         String recipe_id = request.getParameter("recipe_id");
         String carddata=request.getParameter("carddata");
         RecipesManagement recipes=new RecipesManagement();
-        JSONObject obj=recipes.Save(email,recipe_id,carddata);
+        JSONObject obj= null;
+        try {
+            obj = recipes.Save(email,recipe_id,carddata);
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
         out.println(obj);
     }
 }

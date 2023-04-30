@@ -3,7 +3,11 @@ package DataBaseOperation;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.net.URL;
 import java.sql.*;
+import java.util.*;
 
 public class RecipesManagement
 {
@@ -11,10 +15,10 @@ public class RecipesManagement
     private final String dbDriver = "org.postgresql.Driver";
     private final String userName = "postgres";
     private final String password = "root";
-    public JSONObject Save(String email, String recipeId, String carddata) {
+    public JSONObject Save(String email, String recipeId, String carddata) throws SQLException, IOException, ClassNotFoundException {
         JSONObject obj = new JSONObject();
         JSONObject card=new JSONObject(carddata);
-
+        SaveImages(card.getJSONObject("recipe").getString("image"),recipeId);
         try {
             Class.forName(dbDriver);
             Connection conn = DriverManager.getConnection(dbName, userName, password);
@@ -143,19 +147,19 @@ public class RecipesManagement
         JSONObject object=new JSONObject();
 
         try {
-                // Connect to the database
+            // Connect to the database
             Class.forName(dbDriver);
             Connection conn = DriverManager.getConnection(dbName, userName, password);
 
-                // Insert a new row into the user_playlists table
+            // Insert a new row into the user_playlists table
             PreparedStatement stmt1 = conn.prepareStatement(
-                        "WITH user_data AS ( " +
-                                "  SELECT id AS user_id FROM users WHERE email = ? " +
-                                ") " +
-                                "INSERT INTO user_playlists (user_id, playlist_name) " +
-                                "VALUES (?, ?) " +
-                                "RETURNING id AS playlist_id;"
-                );
+                    "WITH user_data AS ( " +
+                            "  SELECT id AS user_id FROM users WHERE email = ? " +
+                            ") " +
+                            "INSERT INTO user_playlists (user_id, playlist_name) " +
+                            "VALUES (?, ?) " +
+                            "RETURNING id AS playlist_id;"
+            );
             stmt1.setString(1, email);
             stmt1.setString(2, email);
             stmt1.setString(3, playlistname);
@@ -165,34 +169,120 @@ public class RecipesManagement
 
             // Insert a new row into the user_playlist_recipe table
             PreparedStatement stmt2 = conn.prepareStatement(
-                        "WITH user_data AS ( " +
-                                "  SELECT id AS user_id FROM users WHERE email = ? " +
-                                "), " +
-                                "playlist_data AS ( " +
-                                "  SELECT id AS playlist_id FROM user_playlists WHERE user_id = ? AND playlist_name = ? " +
-                                "), " +
-                                "saved_data AS ( " +
-                                "  SELECT id AS saved_id FROM user_saved_recipe WHERE recipe_ID = ? AND user_name = ? " +
-                                ") " +
-                                "INSERT INTO user_playlist_recipe (playlist_id, saved_id) " +
-                                "SELECT playlist_id, saved_id FROM playlist_data, saved_data;"
-                );
-                stmt2.setString(1, email);
-               stmt2.setString(2, email);
-                stmt2.setString(3, playlistname);
-                stmt2.setString(4, recipeIds);
-                stmt2.setString(5, email);
-                stmt2.executeUpdate();
+                    "WITH user_data AS ( " +
+                            "  SELECT id AS user_id FROM users WHERE email = ? " +
+                            "), " +
+                            "playlist_data AS ( " +
+                            "  SELECT id AS playlist_id FROM user_playlists WHERE user_id = ? AND playlist_name = ? " +
+                            "), " +
+                            "saved_data AS ( " +
+                            "  SELECT id AS saved_id FROM user_saved_recipe WHERE recipe_ID = ? AND user_name = ? " +
+                            ") " +
+                            "INSERT INTO user_playlist_recipe (playlist_id, saved_id) " +
+                            "SELECT playlist_id, saved_id FROM playlist_data, saved_data;"
+            );
+            stmt2.setString(1, email);
+            stmt2.setString(2, email);
+            stmt2.setString(3, playlistname);
+            stmt2.setString(4, recipeIds);
+            stmt2.setString(5, email);
+            stmt2.executeUpdate();
 
-                // Close the database connection
-                stmt1.close();
-                stmt2.close();
-                conn.close();
-            } catch (SQLException e) {
-                e.printStackTrace();
-            } catch (ClassNotFoundException e) {
+            // Close the database connection
+            stmt1.close();
+            stmt2.close();
+            conn.close();
+        } catch (SQLException e) {
+            e.printStackTrace();
+        } catch (ClassNotFoundException e) {
             throw new RuntimeException(e);
         }
         return object;
     }
+
+    public JSONObject GetSavedPlaylist() {
+        List<JSONObject> playlists = new ArrayList<>();
+        try {
+            Class.forName(dbDriver);
+            Connection conn = DriverManager.getConnection(dbName, userName, password);
+            String sql="SELECT \n" +
+                    "  up.playlist_name, u.username,\n" +
+                    "  COUNT(DISTINCT up.id) AS playlist_count,\n" +
+                    "  JSON_AGG(\n" +
+                    "    JSON_BUILD_OBJECT(\n" +
+                    "      'data', usr.recipe_data\n" +
+                    "    )\n" +
+                    "  ) AS recipe_data\n" +
+                    "  \n" +
+                    "FROM user_playlists up\n" +
+                    "JOIN users u ON up.user_id = u.email\n" +
+                    "JOIN user_playlist_recipe upr ON up.id = upr.playlist_id\n" +
+                    "JOIN user_saved_recipe usr ON upr.saved_id = usr.id\n" +
+                    "GROUP BY up.playlist_name,u.username;";
+            PreparedStatement stmt = conn.prepareStatement(sql);
+            ResultSet rs=stmt.executeQuery();
+
+            while (rs.next()) {
+                JSONObject playlist = new JSONObject();
+                playlist.put("username",rs.getString("username"));
+                playlist.put("playlist_name", rs.getString("playlist_name"));
+                playlist.put("count", rs.getInt("playlist_count"));
+
+                JSONArray myarray=new JSONArray(rs.getString("recipe_data"));
+                Set<String> newSet=new TreeSet<>();
+                ArrayList<JSONObject> mylist=new ArrayList<>();
+                for(int i=0;i<myarray.length();i++)
+                {
+                   newSet.add(myarray.getJSONObject(i).getJSONObject("data").toString());
+                }
+
+                for (String x:newSet)
+                {
+                    JSONObject obj=new JSONObject(x);
+                    mylist.add(obj);
+                }
+                playlist.put("recipes",mylist);
+
+                playlists.add(playlist);
+            }
+
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        } catch (ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
+        JSONObject Result=new JSONObject();
+        Result.put("result",playlists);
+        return Result;
+    }
+    public void SaveImages(String imageUrl,String recipeId) throws IOException, SQLException, ClassNotFoundException {
+        Class.forName(dbDriver);
+        Connection conn = DriverManager.getConnection(dbName, userName, password);
+        URL url = new URL(imageUrl);
+        InputStream inputStream = url.openStream();
+
+        String sql = "INSERT INTO Images (image,image_id) VALUES (?,?)";
+        PreparedStatement statement = conn.prepareStatement(sql);
+        statement.setBytes(1, inputStream.readAllBytes());
+        statement.setString(2,recipeId);
+        statement.executeUpdate();
+
+        inputStream.close();
+        statement.close();
+        conn.close();
+
+    }
+    public byte[] retriveImages(String image_id) throws SQLException, ClassNotFoundException {
+        Class.forName(dbDriver);
+        Connection conn = DriverManager.getConnection(dbName, userName, password);
+        PreparedStatement stmt = conn.prepareStatement("SELECT image FROM images WHERE image_id  = ?");
+        stmt.setString(1, image_id);
+        ResultSet rs = stmt.executeQuery();
+        byte[] imageData = new byte[0];
+        if (rs.next()) {
+            imageData= rs.getBytes("image");
+        }
+        return imageData;
+    }
+
 }
